@@ -1,4 +1,13 @@
 # MAIN README
+Executing Group 7 Code 
+-------------------------------
+
+1. Run "./paparazzi" for opening Paparazzi Center
+2. Select bebop_orange_avoid_guided in the top left
+3. Select the "airframes/tudelft/bebop_avoider.xml" airframe
+4. Select the "flight_plans/tudelft/course_orangeavoid_cyberzoo_guided.xml" flightplan
+5. Clean, Build and Run
+6. In GCS: "Start Engine", "Takeoff", "Start"
 
 Paparazzi UAS
 =============

@@ -1,0 +1,49 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+
+<module name="our_avoider">
+  <doc>
+    <description>
+This module is an example module for the course AE4317 Autonomous Flight of Micro Air Vehicles at the TU Delft.
+This module is used in combination with a color filter (cv_detect_color_object) and the navigation mode of the autopilot.
+The avoidance strategy is to simply count the total number of orange pixels. When above a certain percentage threshold,
+(given by color_count_frac) we assume that there is an obstacle and we turn.
+
+The color filter settings are set using the cv_detect_color_object. This module can run multiple filters simultaneously
+so you have to define which filter to use with the ORANGE_AVOIDER_VISUAL_DETECTION_ID setting.
+    </description>
+    <define name="ORANGE_AVOIDER_VISUAL_DETECTION_ID" value="ABI_BROADCAST" description="which VISUAL_DETECTION message to recieve for orange pole detection."/>
+    <define name="FLOOR_VISUAL_DETECTION_ID" value="ABI_BROADCAST" description="which VISUAL_DETECTION message to recieve for green floor detection."/>
+  </doc>
+  
+  <settings>
+    <dl_settings>
+      <dl_settings name="OurAvoider">
+         <dl_setting var="cnn_enabled" min="0" step="1" max="1" values="OFF|ON" />
+         <dl_setting var="slow_mode_safe_xvel" min="0" step="0.04" max="1.0" shortname="xvSlow"/>
+         <dl_setting var="slow_mode_safe_yvel" min="0" step="0.04" max="0.6" shortname="yvSlow"/>
+         <dl_setting var="fast_mode_safe_xvel" min="0" step="0.04" max="1.4" shortname="xvFast"/>
+         <dl_setting var="fast_mode_safe_yvel" min="0" step="0.04" max="0.8" shortname="yvFast"/>
+         <dl_setting var="heading_turn_rate" min="0" step="0.05" max="2.0" shortname="HeadingTurnRate"/>
+         <dl_setting var="cornering_turn_rate" min="0" step="0.05" max="2.0" shortname="CornTurnRate"/>
+         <dl_setting var="cnn_frontal_obstacle_threshold" min="0" step="0.05" max="1.6" shortname="cnn_FrObsThr"/>
+         <dl_setting var="OUTER_BOUNDS" min="0" step="0.05" max="6.2" shortname="outerBounds"/>
+         <dl_setting var="INNER_BOUNDS" min="0" step="0.05" max="5.4" shortname="innerBounds"/>
+         <dl_setting var="SAFE_BOUNDS" min="0" step="0.05" max="5.0" shortname="safeBounds"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <dep>
+    <depends>cv_detect_color_region</depends>
+  </dep>
+  <header>
+    <file name="our_avoider.h"/>
+  </header>
+  <init fun="our_avoider_init()"/>
+  <periodic fun="our_avoider_periodic()" freq="4"/>
+  <makefile target="ap|nps">
+    <file name="our_avoider.c"/>
+  </makefile>
+
+
+</module>
