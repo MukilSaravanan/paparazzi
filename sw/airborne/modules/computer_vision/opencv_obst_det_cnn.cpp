@@ -39,7 +39,7 @@
 //#include "MobileNetTinyv8CombiTrained.h"
 //#include "MobileNetTinyv9Trained.h"
 //#include "model_heavy.h"
-#include "model_tiny_5_c.h"
+#include "model_tiny_5_cl.h"
 
 #include "lib/vision/image.h"
 #include <sys/time.h>
