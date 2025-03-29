@@ -17,7 +17,7 @@
  * so you have to define which filter to use with the ORANGE_AVOIDER_VISUAL_DETECTION_ID setting.
  */
 
- #include "modules/our_avoider/our_avoider.h"
+ #include "modules/proposed_avoider/proposed_avoider.h"
  #include "firmwares/rotorcraft/guidance/guidance_h.h"
  #include "firmwares/rotorcraft/navigation.h"
  #include "generated/airframe.h"
@@ -46,7 +46,6 @@
    SAFE,
    FRONTAL_OBSTACLE,
    SEARCH_HEADING,
-   SEARCH_FOR_SAFE_HEADING,
    OUT_OF_BOUNDS,
    TOP_LINE,
    RIGHT_LINE,
@@ -59,7 +58,7 @@
  
  // cyberzoo bounds
  float OUTER_BOUNDS = 3.1f;
- float INNER_BOUNDS = 2.7f;
+ float INNER_BOUNDS = 2.6f;
  float SAFE_BOUNDS = 2.5f;
  // angle of cyberzoo wrt NED frame
  float anglewrtEnu = -35;
@@ -68,7 +67,7 @@
  float unsafe_xvel = .5f;
  float unsafe_yvel = .5f;
  float heading_turn_rate = 1.f;
- float heading_search_rate = 0.5f;
+ float heading_search_rate = 0.3f;
  
  // confidence of an object in front of the drone
  float cnn_w_avg = 0.f;
@@ -80,7 +79,7 @@
  float spy = 0.0f;
  
  // Global settings - changable in gcs
- float slow_mode_safe_xvel = .4f;
+ float slow_mode_safe_xvel = .6f;
  float slow_mode_safe_yvel = .3f;
  float fast_mode_safe_xvel = .6f;
  float fast_mode_safe_yvel = .3f;
@@ -89,15 +88,24 @@
  
  float xvel;
  float yvel;
+
+
+ float cnn_weight = 0.7;
+  
+ 
+  
+  
+  // Define CBF parameters
+ float cbf_param = 2.0f; // CBF tuning parameter
  
  // cornering velocities and turn rates when close to an edge
  float cornering_xvel = 0.1f;
- float cornering_yvel = 0.5f;
- float cornering_turn_rate = 1.0f;
+ float cornering_yvel = 0.1f;
+ float cornering_turn_rate = 0.7f;
  
  // yaw rate proportional factors
- float k_outer = .4f;
- float k_inner = .6f;
+ float k_lat = .3f;
+ float k_heading = .6f;
  
  // Orange avoider area sizes
    float region_size = 0.f; 
@@ -201,12 +209,12 @@
    cnn_p_center = array_weighted_moving_average(cnn_n_prev_prob_center);
    cnn_p_right = array_weighted_moving_average(cnn_n_prev_prob_right);
  
-   printf("recieved: l: %f, c: %f, r: %f", cnn_p_left, cnn_p_center, cnn_p_right);
+  printf("recieved: l: %f, c: %f, r: %f", cnn_p_left, cnn_p_center, cnn_p_right);
  
  }
  
  // defining the sizes of the region and the entire slice
- void our_avoider_init(void)
+ void proposed_avoider_init(void)
  {
    srand(time(NULL));
  
@@ -221,7 +229,7 @@
  }
  
  
- void our_avoider_periodic(void)
+ void proposed_avoider_periodic(void)
  {
    // Only run the mudule if we are in the correct flight mode
    if (guidance_h.mode != GUIDANCE_H_MODE_GUIDED) {
@@ -241,11 +249,8 @@
    if (heading_deg > 180){
      heading_deg = heading_deg - 360;
    }
-   // heading values
-   // zero up %%% 180 down %%% positive right %%% negative left
-   printf("SLOW MODE: %d\n", cnn_enabled);
- 
-   // begging of the control loop
+   
+
    switch (navigation_state){
      case SAFE:
        VERBOSE_PRINT("STATE: SAFE\n");
@@ -272,105 +277,146 @@
        }
  
        // if outside inner bounds, turn inside without stopping
-       if (newy >= INNER_BOUNDS-0.2f && ((0 <= heading_deg && heading_deg <= 90) || (-90 <= heading_deg && heading_deg <= 0))) {
+       if (newy >= INNER_BOUNDS && ((0 <= heading_deg && heading_deg <= 90) || (-90 <= heading_deg && heading_deg <= 0))) {
          // close to the top edge
          navigation_state = TOP_LINE;
          break;
-       } else if (newx >= INNER_BOUNDS-0.2f && 0 <= heading_deg && heading_deg <= 180) {
+       } else if (newx >= INNER_BOUNDS && 0 <= heading_deg && heading_deg <= 180) {
          // close to the right edge
          navigation_state = RIGHT_LINE;
          break;
-       } else if (newy <= -INNER_BOUNDS+0.2f && ((90 <= heading_deg  && heading_deg <= 180) || (-180 <= heading_deg && heading_deg <= -90))) {
+       } else if (newy <= -INNER_BOUNDS&& ((90 <= heading_deg  && heading_deg <= 180) || (-180 <= heading_deg && heading_deg <= -90))) {
          // close to the bottom edge
          navigation_state = BOTTOM_LINE;
          break;
-       } else if (newx <= -INNER_BOUNDS+0.2f && -180 <= heading_deg && heading_deg <= 0) {
+       } else if (newx <= -INNER_BOUNDS && -180 <= heading_deg && heading_deg <= 0) {
          // close to the left edge
          navigation_state = LEFT_LINE;
          break;
        }
        // if the drone is not out of bounds or close to out of bounds
-       // set faster velocities if orange avoider is used
-       // set slower velocities if cnn is used
-       // set slow vlocities if were out of bounds
+    
        if (fabsf(newx) < SAFE_BOUNDS && fabsf(newy) < SAFE_BOUNDS) {
          xvel = slow_mode_safe_xvel;
          yvel = slow_mode_safe_yvel;
        }
  
-     // Combine CNN and orange avoider contributions using a weighted average
-     float cnn_weight = 0.8;  // Weight for CNN (70%)
-     float orange_weight = 0.2; // Weight for orange avoider (30%)
+  // Define threshold for switching between orange avoider and CNN
+  float orange_threshold = 0.6f; // Threshold for the sum of of_b and of_c
+
+  // Check if the sum of of_b and of_c exceeds the threshold
+  bool use_orange_avoider = (of_b + of_c) > orange_threshold;
+  printf("OF: %f",of_b+of_c);
+ if ((of_b > 0.3 && of_c > 0.3) || (of_b > 0.6f) || (of_c > 0.6f)){
+  VERBOSE_PRINT("ORANGE_FRONT_OBSTACLE\n");
+ }
+
  
- 
- // Define CBF parameters
- float gamma = 5.0f; // CBF tuning parameter
- 
- // Check for frontal obstacles using both systems
  if ((cnn_p_left > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.2) ||
      cnn_p_center > cnn_frontal_obstacle_threshold - 0.05 ||
      (cnn_p_right > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.2) ||
      (of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_c > 0.75f)) {
-     // If a frontal obstacle is detected, switch to the FRONTAL_OBSTACLE state
-     navigation_state = FRONTAL_OBSTACLE;
-     spx = newx; // Save the last known safe position
-     spy = newy;
- } 
-     // Compute the weighted average for CNN probabilities
-     cnn_w_avg = (0.25 * cnn_p_left + 0.5 * cnn_p_center + 0.25 * cnn_p_right) / 3;
+   // If a frontal obstacle is detected, switch to the FRONTAL_OBSTACLE state
+   navigation_state = FRONTAL_OBSTACLE;
+   spx = newx; // Save the last known safe position
+   spy = newy;
+ }
+//  float applied_forward_velocity ;
+//  float applied_lateral_velocity;
+//  float applied_heading_rate;
+
+  // // Decide which system to use based on the sum of of_b and of_c
+  // if (use_orange_avoider) {
+  //   // Use orange avoider system
+  //   applied_forward_velocity = (1 - of) * xvel; // Orange avoider forward velocity
+  //   applied_lateral_velocity = (k_inner * (of_b - of_c) + k_outer * (of_a - of_d)) * yvel; // Orange avoider lateral velocity
+  //   applied_heading_rate = (k_inner * (of_b - of_c) + k_outer * (of_a - of_d)) * heading_turn_rate; // Orange avoider heading rate
+  //   VERBOSE_PRINT("STATE: ORANGE_AVOIDER\n");
+  // } else {
+  //   // Use CNN-based system
+  //   applied_forward_velocity = (1 - cnn_w_avg) * xvel; // CNN forward velocity
+  //   applied_lateral_velocity = 0.4 * (cnn_p_left - cnn_p_right) * yvel; // CNN lateral velocity
+  //   applied_heading_rate = 0.3 * (cnn_p_left - cnn_p_right) * heading_turn_rate; // CNN heading rate
+  //   VERBOSE_PRINT("STATE: CNN_AVOIDER\n");
+  // }
+    // Adjust the CNN weight based on orange avoider detection
+    if (of > 0.4f) // Threshold for orange avoider detection
+    {
+      cnn_weight = 0.4f; // Reduce CNN weight if orange avoider detection is high
+    }
+    else
+    {
+      cnn_weight = 1.0f; // Default CNN weight
+    }
+    float orange_weight=1.0f -cnn_weight;
+  
+
+float ob_forward_velocity;
+float ob_lateral_velocity=0.0f;
+// float ob_heading_rate=0.0f;
+  // Compute the weighted average for CNN probabilities
+  cnn_w_avg = (0.25 * cnn_p_left + 0.5 * cnn_p_center + 0.25 * cnn_p_right) / 3;
  
-     // Calculate velocities and heading rates for both systems
-     float or_forward_velocity = (1 - of) * xvel; // Orange avoider forward velocity
-     float or_lateral_velocity = (k_inner * (of_b - of_c) + k_outer * (of_a - of_d)) * yvel; // Orange avoider lateral velocity
-     float or_heading_rate = (k_inner * (of_b - of_c) + k_outer * (of_a - of_d)) * heading_turn_rate; // Orange avoider heading rate
- 
-     float ob_forward_velocity = (1 - cnn_w_avg) * xvel; // CNN forward velocity
-     float ob_lateral_velocity = 0.4 * (cnn_p_left - cnn_p_right) * yvel; // CNN lateral velocity
-     float ob_heading_rate = 0.3 * (cnn_p_left - cnn_p_right) * heading_turn_rate; // CNN heading rate
- 
-     // Combine the velocities and heading rates using weighted averages
-     float applied_forward_velocity = (cnn_weight * ob_forward_velocity) + (orange_weight * or_forward_velocity);
-     float applied_lateral_velocity = (cnn_weight * ob_lateral_velocity) + (orange_weight * or_lateral_velocity);
-     float applied_heading_rate = (cnn_weight * ob_heading_rate) + (orange_weight * or_heading_rate);
- 
-     // CBF logic to ensure the drone stays within bounds
-     float distance = sqrt(newx * newx + newy * newy);
-     float h_inner = distance - (INNER_BOUNDS-0.3f); // Barrier function for inner bound
-     float h_outer = OUTER_BOUNDS - distance; // Barrier function for outer bound
- 
-     // Derivatives of the barrier functions
-     float dh_inner_dx = newx / distance;
-     float dh_inner_dy = newy / distance;
-     float dh_outer_dx = -newx / distance;
-     float dh_outer_dy = -newy / distance;
- 
-     // CBF conditions
-     float cbf_inner = dh_inner_dx * applied_forward_velocity + dh_inner_dy * applied_lateral_velocity + gamma * h_inner;
-     float cbf_outer = dh_outer_dx * applied_forward_velocity + dh_outer_dy * applied_lateral_velocity + gamma * h_outer;
- 
-     // Adjust velocities if CBF conditions are violated
-     if (cbf_inner < 0) {
-         float scale_factor = 0.3f; // Reduce velocity to stay within bounds
-         applied_forward_velocity *= scale_factor;
-         applied_lateral_velocity *= scale_factor;
-     }
- 
-     // Track the history of obstacles on the right or left of the drone
-     cnn_sum_r += cnn_p_right;
-     cnn_sum_l += cnn_p_left;
- 
- 
-     // Set the final velocities and heading rates
-     guidance_h_set_body_vel(applied_forward_velocity, applied_lateral_velocity);
-     guidance_h_set_heading_rate(applied_heading_rate);
- 
-     break;
+       // Calculate velocities and heading rates for both systems
+       float or_forward_velocity = (1 - of) * xvel; // Orange avoider forward velocity
+       float or_lateral_velocity = (0.4 * (of_b - of_c) + 0.6 * (of_a - of_d)) * yvel; // Orange avoider lateral velocity
+       float or_heading_rate = (0.4 * (of_b - of_c) + 0.6 * (of_a - of_d)) * heading_turn_rate; // Orange avoider heading rate
+   
+       // CNN forward velocity
+       if (cnn_p_center>0.5){
+        ob_forward_velocity = (1 - (cnn_w_avg+0.3*cnn_p_center)) * xvel; 
+       }
+       else{
+        ob_forward_velocity = (1 - (cnn_w_avg)) * xvel; 
+       }
+       
+       if (abs(cnn_p_left-cnn_p_right)>0.1){ 
+        float ob_lateral_velocity = k_lat * (cnn_p_left - cnn_p_right) * yvel; // CNN lateral velocity
+        
+        
+       }
+
+
+       float ob_heading_rate = k_heading * (cnn_p_left - cnn_p_right) * heading_turn_rate; // CNN heading rate
+       
+       
+       
+       // Combine the velocities and heading rates using weighted averages
+       float applied_forward_velocity = (cnn_weight * ob_forward_velocity) + (orange_weight * or_forward_velocity);
+       float applied_lateral_velocity = (cnn_weight * ob_lateral_velocity) + (orange_weight * or_lateral_velocity);
+       float applied_heading_rate = (cnn_weight * ob_heading_rate) + (orange_weight * or_heading_rate);
+
+  // CBF logic to ensure the drone stays within bounds
+  float distance = sqrt(newx * newx + newy * newy);
+  float h_inner = (INNER_BOUNDS-0.3f)-distance; // Barrier function for inner bound
+
+  // Derivatives of the barrier functions
+  float dh_inner_dx = -newx / distance;
+  float dh_inner_dy = -newy / distance;
+
+  // CBF conditions
+  float cbf_inner = dh_inner_dx * applied_forward_velocity + dh_inner_dy * applied_lateral_velocity + cbf_param * h_inner;
+
+  // Adjust velocities if CBF conditions are violated
+  if (cbf_inner < 0) {
+    float scale_factor = 0.2f; // Reduce velocity to stay within bounds
+    applied_forward_velocity *= scale_factor;
+    applied_lateral_velocity *= scale_factor;
+    applied_forward_velocity = fmax(applied_forward_velocity, 0.2f); // Apply minimum limit
+  }
+
+  // Set the final velocities and heading rates
+  guidance_h_set_body_vel(applied_forward_velocity, applied_lateral_velocity);
+  guidance_h_set_heading_rate(applied_heading_rate);
+
+  break;
  
  
      case FRONTAL_OBSTACLE:
        VERBOSE_PRINT("STATE: FRONTAL_OBSTACLE\n");
        // stop the drone
        guidance_h_set_heading_rate(0.f);
+       guidance_h_set_body_vel(-0.1, 0);
  
        // move the drone back to the lasat known safe location
        float dvx = spx - newx;
@@ -383,8 +429,8 @@
  
        guidance_h_set_body_vel(0.5 * drone_dvx, -0.5 * drone_dvy);
  
-       // if the distance to the last safe location is small enough search for safe heading
-       // this is made to prevent the drone for hovering too close to the obstacle
+      //  if the distance to the last safe location is small enough search for safe heading
+      //  this is made to prevent the drone for hovering too close to the obstacle
        if(dist < 0.15) {
          guidance_h_set_body_vel(0.f, 0.f);
          navigation_state = SEARCH_HEADING;
@@ -394,8 +440,9 @@
  
      case SEARCH_HEADING:
        // first uses the cnn history to determine which side has less objects in order to search for safe heading for as short as possible
+       guidance_h_set_body_vel(0, 0);
        guidance_h_set_heading_rate(sign(cnn_sum_l - cnn_sum_r) * heading_search_rate);
- 
+       VERBOSE_PRINT("STATE: SEARCH_HEADING\n");
        // if using orange avoindance assume safe heading if no obstacle in center regiouns
        if(cnn_enabled == 0) {
          if(of_b < 0.4f && of_c < 0.4f) {
@@ -414,31 +461,19 @@
        break;
  
  
-
- 
- 
-     case OUT_OF_BOUNDS:
-       VERBOSE_PRINT("STATE: OUT_OF_BOUNDS\n");
-       // not currently used was abandoned due to merging branches
-       // when out of bounds stop and search for safe heading
-       guidance_h_set_body_vel(0, 0);
-       navigation_state = SEARCH_FOR_SAFE_HEADING;
-       break;
- 
- 
      case TOP_LINE:
        VERBOSE_PRINT("STATE: TOP_LINE\n");
        // in case we are close to the edge
        // first look at if there are obstacles and we are close to the edge in which case just stop and search for safe heading
-       if(cnn_p_center > 0.8) {
+       if ((cnn_p_left > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       cnn_p_center > cnn_frontal_obstacle_threshold - 0.05 ||
+       (cnn_p_right > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       (of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_c > 0.75f)) {
          guidance_h_set_body_vel(0.f, 0.f);
          navigation_state = SEARCH_HEADING;
          break;  
-       } else if((of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_b > 0.75f)) {
-         guidance_h_set_body_vel(0.f, 0.f);
-         navigation_state = SEARCH_HEADING;
-         break;
-       }
+       } 
+       
  
        // first we check if we have drifted further to the edge of the cyberzoo
        // if there are no obstacles nearby, we look at our current heading and decide to turn either left or right
@@ -446,6 +481,7 @@
            navigation_state = OUT_OF_BOUNDS;
        } else if(heading_deg >= 0 && heading_deg <=110) {
          //turn right
+         
          guidance_h_set_body_vel(cornering_xvel, cornering_yvel);
          guidance_h_set_heading_rate(cornering_turn_rate);
          navigation_state = SAFE;
@@ -466,15 +502,14 @@
        VERBOSE_PRINT("STATE: RIGHT_LINE\n");
        // in case we are close to the edge
        // first look at if there are obstacles and we are close to the edge in which case just stop and search for safe heading
-       if(cnn_p_center > 0.8) {
+       if ((cnn_p_left > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       cnn_p_center > cnn_frontal_obstacle_threshold - 0.05 ||
+       (cnn_p_right > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       (of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_c > 0.75f)) {
          guidance_h_set_body_vel(0.f, 0.f);
          navigation_state = SEARCH_HEADING;
          break;  
-       } else if((of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_b > 0.75f)) {
-         guidance_h_set_body_vel(0.f, 0.f);
-         navigation_state = SEARCH_HEADING;
-         break;
-       }
+       } 
  
        // first we check if we have drifted further to the edge of the cyberzoo
        // if there are no obstacles nearby, we look at our current heading and decide to turn either left or right
@@ -502,15 +537,14 @@
        VERBOSE_PRINT("STATE: BOTTOM_LINE\n");
        // in case we are close to the edge
        // first look at if there are obstacles and we are close to the edge in which case just stop and search for safe heading
-       if(cnn_p_center > 0.8) {
+       if ((cnn_p_left > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       cnn_p_center > cnn_frontal_obstacle_threshold - 0.05 ||
+       (cnn_p_right > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       (of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_c > 0.75f)) {
          guidance_h_set_body_vel(0.f, 0.f);
          navigation_state = SEARCH_HEADING;
          break;  
-       } else if((of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_b > 0.75f)) {
-         guidance_h_set_body_vel(0.f, 0.f);
-         navigation_state = SEARCH_HEADING;
-         break;
-       }
+       } 
  
        // first we check if we have drifted further to the edge of the cyberzoo
        // if there are no obstacles nearby, we look at our current heading and decide to turn either left or right
@@ -538,15 +572,14 @@
        VERBOSE_PRINT("STATE: LEFT_LINE\n");
        // in case we are close to the edge
        // first look at if there are obstacles and we are close to the edge in which case just stop and search for safe heading
-       if(cnn_p_center > 0.8) {
+       if ((cnn_p_left > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       cnn_p_center > cnn_frontal_obstacle_threshold - 0.05 ||
+       (cnn_p_right > cnn_frontal_obstacle_threshold && cnn_p_center > cnn_frontal_obstacle_threshold - 0.3) ||
+       (of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_c > 0.75f)) {
          guidance_h_set_body_vel(0.f, 0.f);
          navigation_state = SEARCH_HEADING;
          break;  
-       } else if((of_b > 0.4 && of_c > 0.4) || (of_b > 0.75f) || (of_b > 0.75f)) {
-         guidance_h_set_body_vel(0.f, 0.f);
-         navigation_state = SEARCH_HEADING;
-         break;
-       }
+       } 
  
        // first we check if we have drifted further to the edge of the cyberzoo
        // if there are no obstacles nearby, we look at our current heading and decide to turn either left or right

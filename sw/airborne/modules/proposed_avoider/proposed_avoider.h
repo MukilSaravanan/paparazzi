@@ -31,8 +31,8 @@ extern float OUTER_BOUNDS;
 extern float INNER_BOUNDS;
 extern float SAFE_BOUNDS;
 
-extern void our_avoider_init(void);
-extern void our_avoider_periodic(void);
+extern void proposed_avoider_init(void);
+extern void proposed_avoider_periodic(void);
 
 #endif
 
