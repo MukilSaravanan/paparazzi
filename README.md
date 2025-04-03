@@ -11,6 +11,9 @@ Executing Group 7 Code
 
 CNN implementation related files - https://github.com/mrr-codes/autonomous_MAV_implementations
 
+## Test Demo:
+[![Test Demo:](test_demo.gif)]()
+
 Paparazzi UAS
 =============
 [![Build Status](https://paparazziuav.semaphoreci.com/badges/paparazzi/branches/master.svg?style=shields&key=d3a59143-a357-434e-89b8-057f15ed8dd2)](https://paparazziuav.semaphoreci.com/projects/paparazzi) [![Gitter chat](https://badges.gitter.im/paparazzi/discuss.svg)](https://gitter.im/paparazzi/discuss)
