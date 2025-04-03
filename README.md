@@ -12,7 +12,7 @@ Executing Group 7 Code
 CNN implementation related files - https://github.com/mrr-codes/autonomous_MAV_implementations
 
 ## Test Demo:
-[![Test Demo](https://drive.google.com/file/d/1wOx-WWfxdG_k9gOFz_5j3W75PzbsQOeC/view?usp=drive_link)]()
+![Test Demo:](test_demo.gif)
 
 Paparazzi UAS
 =============
